@@ -1,0 +1,64 @@
+// Ebike_Traction_Control_WheelSlip.ino
+// Dual wheel speed sensing + PWM torque limiting (prototype traction control)
+
+const int frontHallPin = 2;   // interrupt pin
+const int rearHallPin  = 3;   // interrupt pin
+const int motorPWMPin  = 9;
+
+volatile unsigned long frontLast = 0, rearLast = 0;
+volatile unsigned long frontInterval = 0, rearInterval = 0;
+
+float slipThreshold = 0.15;   // 15% slip
+int basePWM = 200;
+
+void frontISR() {
+  unsigned long t = millis();
+  frontInterval = (frontLast == 0) ? 0 : (t - frontLast);
+  frontLast = t;
+}
+
+void rearISR() {
+  unsigned long t = millis();
+  rearInterval = (rearLast == 0) ? 0 : (t - rearLast);
+  rearLast = t;
+}
+
+float speedFromInterval(unsigned long interval) {
+  if (interval == 0) return 0.0;
+  return 1000.0 / interval; // proportional speed proxy
+}
+
+void setup() {
+  pinMode(motorPWMPin, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(frontHallPin), frontISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(rearHallPin), rearISR, FALLING);
+  Serial.begin(9600);
+  Serial.println("E-Bike Traction Control Active");
+}
+
+void loop() {
+  float frontSpeed = speedFromInterval(frontInterval);
+  float rearSpeed  = speedFromInterval(rearInterval);
+
+  float slip = 0.0;
+  if (frontSpeed > 1.0) {
+    slip = (rearSpeed - frontSpeed) / frontSpeed; // slip ratio
+  }
+
+  int pwmOut = basePWM;
+
+  if (slip > slipThreshold) {
+    // Reduce torque when rear wheel spins faster than front
+    pwmOut = basePWM - (int)(basePWM * min(slip, 0.5));
+    pwmOut = constrain(pwmOut, 120, basePWM);
+  }
+
+  analogWrite(motorPWMPin, pwmOut);
+
+  Serial.print("Front: "); Serial.print(frontSpeed,2);
+  Serial.print(" Rear: "); Serial.print(rearSpeed,2);
+  Serial.print(" Slip: "); Serial.print(slip,2);
+  Serial.print(" PWM: "); Serial.println(pwmOut);
+
+  delay(200);
+}
